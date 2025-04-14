@@ -1,6 +1,6 @@
-# KuberKlone - A Kubernetes-like Cluster Simulator
+# KuberKopy - A Kubernetes-like Cluster Simulator
 
-KuberKlone is a lightweight, simulation-based distributed system that mimics core Kubernetes cluster management functionalities. It provides a simplified yet comprehensive platform for demonstrating key distributed computing concepts.
+KuberKopy is a lightweight, simulation-based distributed system that mimics core Kubernetes cluster management functionalities. It provides a simplified yet comprehensive platform for demonstrating key distributed computing concepts.
 
 ## Features
 
@@ -56,7 +56,7 @@ KuberKopy/
 1. Clone the repository:
 ```bash
 git clone <repository-url>
-cd KuberKlone
+cd <into repo>
 ```
 
 2. Install dependencies:
