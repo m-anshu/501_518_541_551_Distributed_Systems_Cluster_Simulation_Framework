@@ -7,10 +7,11 @@ import (
 	"log"
 	"net/http"
 	"time"
-  "os"
-  "os/signal"
-  "syscall"
-  "context"
+	"os"
+	"os/signal"
+	"syscall"
+	"context"
+	"github.com/docker/docker/client"
 )
 
 // API Handler to add a new node
@@ -27,18 +28,35 @@ func (nm *NodeManager) AddNodeHandler(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
+	// Verify container status before adding node
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create Docker client"})
+		return
+	}
+
+	inspect, err := cli.ContainerInspect(context.Background(), id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to inspect container"})
+		return
+	}
+
+	initialStatus := NodeStatusRunning
+	if !inspect.State.Running {
+		initialStatus = NodeStatusStopped
+	}
+
 	newNode := Node{
 		ID:        id,
 		CPUs:      request.CPUs,
 		UsedCPUs:  0,
-		Status:    "Running",
+		Status:    initialStatus,
 		Pods:      []string{},
 		CreatedAt: time.Now(),
 	}
 	nm.AddNode(newNode)
-	log.Printf("Node created: id=%s, cpus=%d", id, request.CPUs)
-	//Simulate Heartbeat Initialization
-	println("Simulating heartbeat initialization for node:", id)
+	log.Printf("Node created: id=%s, cpus=%d, status=%s", id, request.CPUs, initialStatus)
 
 	c.JSON(http.StatusOK, gin.H{"message": "Node added", "node_id": id})
 }

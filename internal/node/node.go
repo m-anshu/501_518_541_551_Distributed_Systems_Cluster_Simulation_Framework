@@ -10,14 +10,21 @@ import (
     "github.com/docker/docker/client"
 )
 
+// Node status constants
+const (
+    NodeStatusRunning  = "Running"
+    NodeStatusStopped  = "Stopped"
+    NodeStatusUnhealthy = "Unhealthy"
+)
+
 // Node structure to store node information
 type Node struct {
-    ID     string `json:"id"`
-    CPUs   int    `json:"cpus"`
-    UsedCPUs int      `json:"used_cpus"`
-    Status string `json:"status"`
-    Pods   []string `json:"pods"` 
-    CreatedAt time.Time `json:"created_at"`// List of Pod IDs running on the node
+    ID       string    `json:"id"`
+    CPUs     int       `json:"cpus"`
+    UsedCPUs int       `json:"used_cpus"`
+    Status   string    `json:"status"`
+    Pods     []string  `json:"pods"`
+    CreatedAt time.Time `json:"created_at"`
 }
 
 // Function to create a new node container
@@ -32,7 +39,7 @@ func CreateNodeContainer(cpus int) (string, error) {
     resp, err := cli.ContainerCreate(
         context.Background(),
         &container.Config{
-            Image: "python:3.8-slim", // Use a lightweight image
+            Image: "python:3.8-slim",
             Cmd:   []string{"sh", "-c", "while true; do sleep 30; done"},
         },
         nil, nil, nil, containerName)
@@ -43,6 +50,16 @@ func CreateNodeContainer(cpus int) (string, error) {
     err = cli.ContainerStart(context.Background(), resp.ID, container.StartOptions{})
     if err != nil {
         return "", err
+    }
+
+    // Verify container is running
+    inspect, err := cli.ContainerInspect(context.Background(), containerName)
+    if err != nil {
+        return "", fmt.Errorf("failed to verify container status: %v", err)
+    }
+
+    if !inspect.State.Running {
+        return "", fmt.Errorf("container failed to start")
     }
 
     return containerName, nil
@@ -69,20 +86,31 @@ func DeleteNodeContainer(nodeID string) (error){
     return nil
 }
 
-func StopNodeContainer(nodeID string) (error){
-
+func StopNodeContainer(nodeID string) error {
     cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
     if err != nil {
         return err
     }
     ctx := context.Background()
 
-    // Attempt to stop the container (if not already stopped).  Force stop if needed.
-    if err := cli.ContainerStop(ctx, nodeID, container.StopOptions{}); err != nil {
-        log.Printf("Error stopping container %s: %v", nodeID, err)
-        // Continue even if stopping fails.
+    // Get current container state
+    inspect, err := cli.ContainerInspect(ctx, nodeID)
+    if err != nil {
+        return fmt.Errorf("failed to inspect container: %v", err)
     }
-    // Remove the container.
+
+    // Only stop if running
+    if inspect.State.Running {
+        // Use graceful stop with default timeout
+        if err := cli.ContainerStop(ctx, nodeID, container.StopOptions{}); err != nil {
+            log.Printf("Error stopping container %s: %v", nodeID, err)
+            return err
+        }
+        log.Printf("Container %s stopped gracefully", nodeID)
+    } else {
+        log.Printf("Container %s is already stopped", nodeID)
+    }
+
     return nil
 }
 

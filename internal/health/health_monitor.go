@@ -32,8 +32,6 @@ func (hm *HealthManager) StartMonitoring() {
 
 // checkNodesHealth inspects the container for each node and updates its status.
 func (hm *HealthManager) checkNodesHealth() {
-	// Lock NodeManager to safely update the nodes map.
-
 	hm.NodeManager.Mu.Lock()
 	defer hm.NodeManager.Mu.Unlock()
 
@@ -48,19 +46,34 @@ func (hm *HealthManager) checkNodesHealth() {
 		if err != nil {
 			log.Printf("Error inspecting container %s: %v", id, err)
 			node.Status = "Unhealthy"
-
-			if err := hm.NodeManager.RestartNode(id); err != nil {
-				log.Printf("Auto-restart failed for node %s: %v", id, err)
-			}
-
-		} else {
-			if inspect.State.Running {
-				node.Status = "Running"
-			} else {
-				node.Status = "Stopped"
-			}
+			hm.NodeManager.Nodes[id] = node
+			continue
 		}
+
+		previousStatus := node.Status
+
+		// Update node status based on container state
+		if !inspect.State.Running {
+			if inspect.State.ExitCode == 0 {
+				// Clean exit - intentional stop
+				node.Status = "Stopped"
+				log.Printf("Health Monitor: Node %s intentionally stopped", id)
+			} else {
+				// Non-zero exit code - failure
+				node.Status = "Unhealthy"
+				log.Printf("Health Monitor: Node %s failed with exit code %d", id, inspect.State.ExitCode)
+				// Only attempt restart if it wasn't intentionally stopped
+				if previousStatus != "Stopped" {
+					if err := hm.NodeManager.RestartNode(id); err != nil {
+						log.Printf("Failed to restart node %s: %v", id, err)
+					}
+				}
+			}
+		} else {
+			node.Status = "Running"
+			log.Printf("Health Monitor: Node %s running", id)
+		}
+
 		hm.NodeManager.Nodes[id] = node
-		log.Printf("Health Monitor: Node %s running", id)
 	}
 }

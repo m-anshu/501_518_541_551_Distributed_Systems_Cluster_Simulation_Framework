@@ -60,12 +60,12 @@ func checkNodeHealth(containerID string) (bool, error) {
 func (nm *NodeManager) RestartNode(nodeID string) error {
     // nm.Mu.Lock()
     _, exists := nm.Nodes[nodeID]
-    log.Print("stuff")
+    log.Print("processing 1")
     // defer nm.Mu.Unlock()
     if !exists {
         return fmt.Errorf("node not found")
     }
-    log.Print("here")
+    log.Print("processing 2")
 
     cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
     if err != nil {
@@ -73,7 +73,7 @@ func (nm *NodeManager) RestartNode(nodeID string) error {
     }
 
     
-    log.Print("shit")
+    log.Print("processing 3")
     if err :=RestartNodeContainer(nodeID);  err != nil {
         return err
     }
@@ -86,7 +86,7 @@ func (nm *NodeManager) RestartNode(nodeID string) error {
     if err != nil || !healthy {
         log.Printf("Node %s still unhealthy, removing and rescheduling...", nodeID)
         _ = cli.ContainerRemove(context.Background(), nodeID, container.RemoveOptions{Force: true})
-        nm.reschedulePods(nodeID)
+        nm.ReschedulePods(nodeID)
         return fmt.Errorf("node restart failed and was removed")
     }
 
@@ -114,4 +114,48 @@ func (nm *NodeManager) ShutdownNodes() {
 	}
 
 	log.Println("All nodes have been stopped.")
+}
+
+// ReschedulePods reschedules all pods from a failed node to other available nodes
+func (nm *NodeManager) ReschedulePods(failedNodeID string) {
+    nm.Mu.Lock()
+    var podsToReschedule []string
+    if nodeObj, exists := nm.Nodes[failedNodeID]; exists {
+        podsToReschedule = nodeObj.Pods
+    } else {
+        // If the node is gone, assume we recorded its pods before deletion.
+        // Here, you might store such info elsewhere. For simplicity, we'll scan all pods.
+        for _, p := range nm.Pods {
+            if p.NodeID == failedNodeID {
+                podsToReschedule = append(podsToReschedule, p.ID)
+            }
+        }
+    }
+    nm.Mu.Unlock()
+
+    for _, podID := range podsToReschedule {
+        nm.Mu.Lock()
+        p, exists := nm.Pods[podID]
+        if !exists {
+            nm.Mu.Unlock()
+            continue
+        }
+        // Clear current assignment
+        p.NodeID = ""
+        p.Status = "Pending"
+        nm.Pods[podID] = p
+        nm.Mu.Unlock()
+
+        nm.Mu.Lock()
+        newNodeID, err := SchedulePod(p, nm.Nodes, "first_fit")
+        if err == nil {
+            p.NodeID = newNodeID
+            p.Status = "Running"
+            nm.Pods[podID] = p
+            log.Printf("Pod %s rescheduled to node %s", podID, newNodeID)
+        } else {
+            log.Printf("Failed to reschedule pod %s: %v", podID, err)
+        }
+        nm.Mu.Unlock()
+    }
 }
